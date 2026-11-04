@@ -1,0 +1,15 @@
+{
+ "name": "Ирина Тестова",
+ "type": "personal_chat",
+ "id": 1000001,
+ "messages": [
+  {"id": 1, "type": "message", "date": "2026-07-01T10:00:00", "from": "Ирина Тестова", "from_id": "user111", "text": "Здравствуйте! Сколько стоит абонемент на месяц?"},
+  {"id": 2, "type": "message", "date": "2026-07-01T10:05:00", "from": "Студия Учебная", "from_id": "user999", "text": "Здравствуйте, Ирина! Абонемент на месяц 4 000 ₽, восемь занятий."},
+  {"id": 3, "type": "service", "date": "2026-07-01T10:06:00", "actor": "Ирина Тестова", "actor_id": "user111", "action": "pin_message", "text": ""},
+  {"id": 4, "type": "message", "date": "2026-07-01T10:07:00", "from": "Ирина Тестова", "from_id": "user111", "text": ["А можно оплатить частями? Мой телефон ", {"type": "phone", "text": "+7 000 111-22-33"}, ", перезвоните"]},
+  {"id": 5, "type": "message", "date": "2026-07-01T10:08:00", "from": "Ирина Тестова", "from_id": "user111", "media_type": "voice_message", "file": "voice_messages/audio_1.ogg", "duration_seconds": 12, "text": ""},
+  {"id": 6, "type": "message", "date": "2026-07-01T10:10:00", "from": "Студия Учебная", "from_id": "user999", "text": [{"type": "plain", "text": "Да, можно в два платежа. Напишите на "}, {"type": "email", "text": "irina.testova@example.com"}, " или ", {"type": "mention", "text": "@studia_uchebnaya"}]},
+  {"id": 7, "type": "message", "date": "2026-07-01T10:11:00", "from": "Ирина Тестова", "from_id": "user111", "media_type": "sticker", "sticker_emoji": "👍", "file": "stickers/s.webp", "text": ""},
+  {"id": 8, "type": "message", "date": "2026-07-01T10:12:00", "from": "Ирина Тестова", "from_id": "user111", "photo": "photos/photo_1.jpg", "text": "Вот мой чек"}
+ ]
+}
