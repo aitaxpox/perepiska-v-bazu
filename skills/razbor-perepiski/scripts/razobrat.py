@@ -19,6 +19,7 @@ import re
 import sys
 from collections import Counter
 from datetime import datetime
+from html.parser import HTMLParser
 
 
 class OshibkaRazbora(Exception):
@@ -34,7 +35,18 @@ STROKA_WHATSAPP = re.compile(
 
 
 def opredelit_format(put):
+    if os.path.isdir(put):
+        if os.path.isfile(os.path.join(put, "result.json")):
+            return "telegram"
+        if os.path.isfile(os.path.join(put, "messages.html")):
+            return "telegram-html"
+        raise OshibkaRazbora(
+            f"В папке {os.path.basename(put)} нет ни result.json, ни messages.html. "
+            "Укажите папку выгрузки Telegram или сам файл."
+        )
     rasshirenie = os.path.splitext(put)[1].lower()
+    if rasshirenie in (".html", ".htm"):
+        return "telegram-html"
     if rasshirenie == ".json":
         return "telegram"
     if rasshirenie == ".csv":
@@ -48,8 +60,8 @@ def opredelit_format(put):
                 if STROKA_WHATSAPP.match(stroka.strip()):
                     return "whatsapp"
     raise OshibkaRazbora(
-        f"Не понимаю формат файла {os.path.basename(put)}. Подходят: result.json из Telegram Desktop, "
-        ".txt из «Экспорт чата» WhatsApp, .csv из CRM."
+        f"Не понимаю формат файла {os.path.basename(put)}. Подходят: папка выгрузки Telegram "
+        "(messages.html или result.json), .txt из «Экспорт чата» WhatsApp, .csv из CRM."
     )
 
 
@@ -59,12 +71,28 @@ DATA_CHISLA = re.compile(
 )
 
 
+DATA_SLOVAMI = re.compile(r"^(\d{1,2})\s+([A-Za-zА-Яа-яЁё]+)\.?\s+(\d{4})(?:\s*г\.)?,?\s+(\d{1,2}):(\d{2})")
+MESYACY = {
+    "янв": 1, "фев": 2, "мар": 3, "апр": 4, "мая": 5, "май": 5, "июн": 6, "июл": 7, "авг": 8,
+    "сен": 9, "окт": 10, "ноя": 11, "дек": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8,
+    "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+
 def normalizovat_datu(stroka):
     """Любую дату из выгрузок приводит к виду ГГГГ-ММ-ДД ЧЧ:ММ. Непонятную оставляет как есть."""
     s = stroka.strip().replace(" ", " ")
     m = DATA_ISO.match(s)
+    m_slova = DATA_SLOVAMI.match(s)
     if m:
         god, mesyac, den, chas, minuta = (int(x) for x in m.groups())
+    elif m_slova:
+        den, slovo, god, chas, minuta = m_slova.groups()
+        mesyac = MESYACY.get(slovo[:3].lower())
+        if mesyac is None:
+            return stroka
+        den, god, chas, minuta = int(den), int(god), int(chas), int(minuta)
     else:
         m = DATA_CHISLA.match(s)
         if not m:
@@ -130,11 +158,131 @@ def chitat_telegram(put):
                 propushcheno[vid] += 1
             tekst = skleit_tekst(s.get("text")).strip()
             if tekst:
-                soobshcheniya.append({
+                soobshchenie = {
+                    "id": str(s.get("id", "")),
                     "data": normalizovat_datu(s.get("date", "")),
                     "avtor": s.get("from") or "Удалённый аккаунт",
                     "tekst": tekst,
-                })
+                }
+                if s.get("reply_to_message_id") is not None:
+                    soobshchenie["otvet_na"] = str(s["reply_to_message_id"])
+                soobshcheniya.append(soobshchenie)
+    return soobshcheniya, propushcheno, sluzhebnyh
+
+
+# ---------- Telegram, выгрузка в HTML (Telegram для Mac выгружает только так) ----------
+
+PUSTYE_TEGI = {"br", "img", "meta", "link", "hr", "input", "source", "wbr"}
+MEDIA_HTML = {
+    "media_photo": "фото", "photo_wrap": "фото", "media_video": "видео", "video_file_wrap": "видео",
+    "media_voice_message": "голосовое", "media_audio_file": "аудио", "media_file": "файл",
+    "media_video_message": "видеосообщение", "media_poll": "опрос", "sticker_wrap": "стикер",
+    "animated_wrap": "гиф", "media_location": "место", "media_live_location": "место", "media_contact": "контакт",
+}
+
+
+class ChitatelTelegramHtml(HTMLParser):
+    def __init__(self, posledniy_avtor=None):
+        super().__init__(convert_charrefs=True)
+        self.stek = []
+        self.soobshcheniya, self.propushcheno, self.sluzhebnyh = [], Counter(), 0
+        self.posledniy_avtor = posledniy_avtor
+        self.tek = None
+
+    def vnutri(self, rol):
+        return any(r == rol for _, r in self.stek)
+
+    def handle_starttag(self, teg, atributy):
+        a = dict(atributy)
+        klassy = (a.get("class") or "").split()
+        rol = None
+        if teg == "div" and "message" in klassy and self.tek is None:
+            if "service" in klassy:
+                self.sluzhebnyh += 1
+            elif "default" in klassy:
+                self.tek = {"id": (a.get("id") or "").replace("message", ""), "avtor": None, "data": "",
+                            "tekst": [], "otvet_na": None, "media": None, "pereslano": False}
+                rol = "soobshchenie"
+        elif self.tek is not None:
+            if teg == "div" and klassy == ["from_name"] and self.tek["avtor"] is None and not self.tek["pereslano"]:
+                rol = "avtor"
+                self.tek["avtor_chasti"] = []
+            elif "date" in klassy and "details" in klassy and a.get("title") and not self.tek["data"]:
+                self.tek["data"] = a["title"]
+            elif "reply_to" in klassy:
+                rol = "otvet"
+            elif "forwarded_from" in klassy or "forwarded" in klassy:
+                self.tek["pereslano"] = True
+            elif teg == "div" and klassy == ["text"]:
+                rol = "tekst"
+            elif teg == "a" and self.vnutri("otvet") and (a.get("href") or "").startswith("#go_to_message"):
+                self.tek["otvet_na"] = a["href"][len("#go_to_message"):]
+            elif teg == "br" and self.vnutri("tekst"):
+                self.tek["tekst"].append("\n")
+            for klass in klassy:
+                if klass in MEDIA_HTML and not self.tek["media"]:
+                    self.tek["media"] = MEDIA_HTML[klass]
+        if teg not in PUSTYE_TEGI:
+            self.stek.append((teg, rol))
+
+    def handle_endtag(self, teg):
+        if teg in PUSTYE_TEGI:
+            return
+        while self.stek:
+            t, rol = self.stek.pop()
+            if rol == "avtor":
+                self.tek["avtor"] = " ".join("".join(self.tek.pop("avtor_chasti")).split())
+            elif rol == "soobshchenie":
+                self.zakonchit()
+            if t == teg:
+                break
+
+    def handle_data(self, dannye):
+        if self.tek is None:
+            return
+        if self.vnutri("avtor"):
+            self.tek["avtor_chasti"].append(dannye)
+        elif self.vnutri("tekst") and not self.vnutri("otvet"):
+            self.tek["tekst"].append(dannye)
+
+    def zakonchit(self):
+        s, self.tek = self.tek, None
+        if s["avtor"]:
+            self.posledniy_avtor = s["avtor"]
+        avtor = s["avtor"] or self.posledniy_avtor or "Без имени"
+        if s["pereslano"]:
+            self.propushcheno["пересланное"] += 1
+            return
+        if s["media"]:
+            self.propushcheno[s["media"]] += 1
+        tekst = re.sub(r"[ \t]+\n", "\n", "".join(s["tekst"])).strip()
+        if tekst:
+            soobshchenie = {"id": s["id"], "data": normalizovat_datu(s["data"]), "avtor": avtor, "tekst": tekst}
+            if s["otvet_na"]:
+                soobshchenie["otvet_na"] = s["otvet_na"]
+            self.soobshcheniya.append(soobshchenie)
+
+
+def fayly_html(papka):
+    def nomer(imya):
+        m = re.match(r"messages(\d*)\.html$", imya)
+        return int(m.group(1) or 1) if m else None
+    imena = [i for i in os.listdir(papka) if nomer(i) is not None]
+    return [os.path.join(papka, i) for i in sorted(imena, key=nomer)]
+
+
+def chitat_telegram_html(put):
+    papka = put if os.path.isdir(put) else os.path.dirname(os.path.abspath(put))
+    soobshcheniya, propushcheno, sluzhebnyh, avtor = [], Counter(), 0, None
+    for fayl in fayly_html(papka):
+        chitatel = ChitatelTelegramHtml(avtor)
+        with open(fayl, encoding="utf-8-sig", errors="replace") as f:
+            chitatel.feed(f.read())
+        chitatel.close()
+        soobshcheniya += chitatel.soobshcheniya
+        propushcheno.update(chitatel.propushcheno)
+        sluzhebnyh += chitatel.sluzhebnyh
+        avtor = chitatel.posledniy_avtor
     return soobshcheniya, propushcheno, sluzhebnyh
 
 
@@ -280,11 +428,15 @@ def chitat_csv(put, kolonki):
 # ---------- общее ----------
 
 def prochitat(put, fmt=None, kolonki=None):
-    if not os.path.isfile(put):
+    if not os.path.exists(put):
         raise OshibkaRazbora(f"Файл не найден: {put}")
     fmt = fmt or opredelit_format(put)
     if fmt == "telegram":
+        if os.path.isdir(put):
+            put = os.path.join(put, "result.json")
         soobshcheniya, propushcheno, sluzhebnyh = chitat_telegram(put)
+    elif fmt == "telegram-html":
+        soobshcheniya, propushcheno, sluzhebnyh = chitat_telegram_html(put)
     elif fmt == "whatsapp":
         soobshcheniya, propushcheno, sluzhebnyh = chitat_whatsapp(put)
     elif fmt == "csv":
@@ -313,14 +465,30 @@ def maskirovat(tekst):
     return tekst, {k: v for k, v in schet.items() if v}
 
 
-def shablon_imeni(imena_klientov, imena_vseh):
-    """Полные имена всех участников и отдельные слова имён клиентов, с падежными окончаниями."""
+def shablon_imeni(imena_klientov, imena_vseh, obychnye_slova=()):
+    """Полные имена всех участников и отдельные слова имён клиентов, с падежными окончаниями.
+
+    Слово из имени, которое в переписке часто пишут со строчной буквы («любовь», «тантра»),
+    отдельно не скрывается: это обычное слово, а не имя.
+    """
     chasti = set()
     for imya in imena_vseh:
         if len(imya) >= 3:
             chasti.add(re.escape(imya))
+    po_nachalu = {}
+    for slovo, n in dict(obychnye_slova).items():
+        po_nachalu.setdefault(slovo[:3], []).append((slovo, n))
+
+    def obychnoe(slovo):
+        osnova = slovo.lower()[:-1] if len(slovo) >= 4 else slovo.lower()
+        vstrech = sum(n for w, n in po_nachalu.get(osnova[:3], [])
+                      if w.startswith(osnova) and len(w) - len(osnova) <= 3)
+        return vstrech >= 3
+
     for imya in imena_klientov:
         for slovo in re.findall(r"\w+", imya):
+            if obychnoe(slovo):
+                continue
             if len(slovo) >= 4 and slovo[0].isupper():
                 chasti.add(re.escape(slovo[:-1]) + r"\w{0,3}")
             elif len(slovo) == 3 and slovo[0].isupper():
@@ -349,15 +517,27 @@ def razmetit(soobshcheniya, vladelcy):
             nomer += 1
             roli[avtor] = f"Клиент {nomer}"
     klienty = [a for a in avtory if a not in vladelcy]
-    shablon = shablon_imeni(klienty, avtory)
-    itog, schet = [], Counter()
+    strochnye = Counter(
+        slovo for s in soobshcheniya for slovo in re.findall(r"(?<!\w)[a-zа-яё]+(?!\w)", s["tekst"])
+    )
+    shablon = shablon_imeni(klienty, avtory, strochnye)
+    itog, schet, po_id = [], Counter(), {}
     for s in soobshcheniya:
         tekst, maski = maskirovat(s["tekst"])
         schet.update(maski)
         if shablon:
             tekst, n = shablon.subn("[имя]", tekst)
             schet["имя"] += n
-        itog.append({"data": s["data"], "rol": roli[s["avtor"]], "tekst": tekst})
+        rol = roli[s["avtor"]]
+        if s.get("id"):
+            po_id[s["id"]] = (rol, tekst)
+        tsel = po_id.get(s.get("otvet_na") or "")
+        if tsel:
+            tsitata = " ".join(tsel[1].split())
+            if len(tsitata) > 60:
+                tsitata = tsitata[:60] + "…"
+            tekst = f"[↪ {tsel[0]}: «{tsitata}»] {tekst}"
+        itog.append({"data": s["data"], "rol": rol, "tekst": tekst})
     return itog, {k: v for k, v in schet.items() if v}
 
 
@@ -448,7 +628,7 @@ def main(argv=None):
     p.add_argument("--data", help="CSV: колонка с датой")
     p.add_argument("--tekst", help="CSV: колонка с текстом")
     p.add_argument("--s", help="брать сообщения начиная с даты ГГГГ-ММ-ДД")
-    p.add_argument("--format", choices=["telegram", "whatsapp", "csv"], help="если формат не угадался")
+    p.add_argument("--format", choices=["telegram", "telegram-html", "whatsapp", "csv"], help="если формат не угадался")
     p.add_argument("-o", help="записать результат в файл")
     args = p.parse_args(argv)
     try:

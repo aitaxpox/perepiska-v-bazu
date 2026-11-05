@@ -30,6 +30,19 @@ class TestFormat(unittest.TestCase):
     def test_uznaet_csv(self):
         self.assertEqual(razobrat.opredelit_format(primer("crm-cp1251.csv")), "csv")
 
+    def test_uznaet_html_telegram_po_papke_i_po_faylu(self):
+        self.assertEqual(razobrat.opredelit_format(primer("telegram-html")), "telegram-html")
+        self.assertEqual(razobrat.opredelit_format(primer("telegram-html/messages.html")), "telegram-html")
+
+    def test_papka_s_result_json(self):
+        with tempfile.TemporaryDirectory() as papka:
+            with open(primer("telegram-result.json"), encoding="utf-8") as f, \
+                    open(os.path.join(papka, "result.json"), "w", encoding="utf-8") as g:
+                g.write(f.read())
+            self.assertEqual(razobrat.opredelit_format(papka), "telegram")
+            soobshcheniya, _ = razobrat.prochitat(papka)
+        self.assertEqual(len(soobshcheniya), 5)
+
 
 class TestData(unittest.TestCase):
     def test_raznye_formaty_daty(self):
@@ -39,6 +52,13 @@ class TestData(unittest.TestCase):
         self.assertEqual(n("01.07.2026 9:05"), "2026-07-01 09:05")
         self.assertEqual(n("10/28/26, 2:05 PM"), "2026-10-28 14:05")
         self.assertEqual(n("28/10/2026, 14:05"), "2026-10-28 14:05")
+
+    def test_data_slovami_iz_telegram_dlya_mac(self):
+        n = razobrat.normalizovat_datu
+        self.assertEqual(n("5 мая 2026, 12:11:12"), "2026-05-05 12:11")
+        self.assertEqual(n("12 июня 2020, 13:51:31"), "2020-06-12 13:51")
+        self.assertEqual(n("3 December 2025, 9:05:00"), "2025-12-03 09:05")
+        self.assertEqual(n("05.05.2026 13:00:00 UTC+05:00"), "2026-05-05 13:00")
 
     def test_neponyatnaya_data_ostaetsya_kak_est(self):
         self.assertEqual(razobrat.normalizovat_datu("вчера"), "вчера")
@@ -77,6 +97,53 @@ class TestTelegram(unittest.TestCase):
                 json.dump({"chats": {"list": [chat, chat]}}, f, ensure_ascii=False)
             soobshcheniya, _ = razobrat.prochitat(put)
         self.assertEqual(len(soobshcheniya), 10)
+
+
+class TestTelegramHtml(unittest.TestCase):
+    def setUp(self):
+        self.soobshcheniya, self.stat = razobrat.prochitat(primer("telegram-html"))
+
+    def test_soobshcheniya_iz_dvuh_faylov_po_poryadku(self):
+        self.assertEqual([s["tekst"] for s in self.soobshcheniya], [
+            "Здравствуйте! Сколько стоит абонемент?",
+            "И есть ли рассрочка?\nХочу частями",
+            "Абонемент 4 000 ₽, можно в два платежа. Пишите irina.testova@example.com",
+            "А парковка есть?",
+            "Вот схема проезда",
+        ])
+
+    def test_avtor_prodolzheniya_beretsya_iz_predydushchego(self):
+        self.assertEqual([s["avtor"] for s in self.soobshcheniya], [
+            "Ирина Тестова", "Ирина Тестова", "Студия Учебная", "Пётр Пробный", "Студия Учебная",
+        ])
+
+    def test_daty(self):
+        self.assertEqual(self.soobshcheniya[0]["data"], "2026-05-05 12:11")
+        self.assertEqual(self.soobshcheniya[-1]["data"], "2026-05-05 13:00")
+
+    def test_otvet_na_soobshchenie(self):
+        self.assertEqual(self.soobshcheniya[2]["otvet_na"], "11")
+        self.assertEqual(self.soobshcheniya[0]["id"], "11")
+
+    def test_propushcheno_i_sluzhebnye(self):
+        self.assertEqual(self.stat["propushcheno"], {"голосовое": 1, "пересланное": 1, "фото": 1})
+        self.assertEqual(self.stat["sluzhebnyh"], 2)
+
+    def test_otvet_vidno_v_razmetke(self):
+        razmecheno, _ = razobrat.razmetit(self.soobshcheniya, vladelcy=["Студия Учебная"])
+        self.assertEqual(
+            razmecheno[2]["tekst"],
+            "[↪ Клиент 1: «Здравствуйте! Сколько стоит абонемент?»] "
+            "Абонемент 4 000 ₽, можно в два платежа. Пишите [почта]",
+        )
+
+    def test_dlinnaya_tsitata_obrezaetsya(self):
+        soobshcheniya = [
+            {"id": "1", "data": "2026-05-05 10:00", "avtor": "Клиентка", "tekst": "а" * 100},
+            {"id": "2", "data": "2026-05-05 10:01", "avtor": "Студия", "tekst": "Ответ", "otvet_na": "1"},
+        ]
+        razmecheno, _ = razobrat.razmetit(soobshcheniya, vladelcy=["Студия"])
+        self.assertEqual(razmecheno[1]["tekst"], "[↪ Клиент 1: «" + "а" * 60 + "…»] Ответ")
 
 
 class TestWhatsApp(unittest.TestCase):
@@ -161,6 +228,24 @@ class TestRoli(unittest.TestCase):
         self.assertNotIn("+7 000", teksty)
         self.assertNotIn("@studia", teksty)
         self.assertEqual(self.schet["телефон"], 1)
+
+    def test_obychnoe_slovo_iz_nika_ne_skryvaetsya(self):
+        soobshcheniya = [
+            {"data": "2026-05-05 10:00", "avtor": "Любовь Светлова", "tekst": "Любовь — это практика? любовь и любовь, и ещё раз любовь"},
+            {"data": "2026-05-05 10:01", "avtor": "Ирина Тестова", "tekst": "Любовь Светлова, Ирина спрашивает про Ирину"},
+            {"data": "2026-05-05 10:02", "avtor": "Студия", "tekst": "Ответ"},
+        ]
+        razmecheno, _ = razobrat.razmetit(soobshcheniya, vladelcy=["Студия"])
+        self.assertEqual(razmecheno[0]["tekst"], "Любовь — это практика? любовь и любовь, и ещё раз любовь")
+        self.assertEqual(razmecheno[1]["tekst"], "[имя], [имя] спрашивает про [имя]")
+
+    def test_formy_obychnogo_slova_ne_skryvayutsya(self):
+        soobshcheniya = [
+            {"data": "2026-05-05 10:00", "avtor": "Добро Пожаловать", "tekst": "Привет"},
+            {"data": "2026-05-05 10:01", "avtor": "Студия", "tekst": "Доброе утро! добрый день, доброго вечера, добрые люди"},
+        ]
+        razmecheno, _ = razobrat.razmetit(soobshcheniya, vladelcy=["Студия"])
+        self.assertEqual(razmecheno[1]["tekst"], "Доброе утро! добрый день, доброго вечера, добрые люди")
 
     def test_neizvestnyy_vladelec_oshibka(self):
         soobshcheniya, _ = razobrat.prochitat(primer("telegram-result.json"))
