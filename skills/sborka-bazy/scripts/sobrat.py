@@ -79,9 +79,12 @@ def proverit(temy, kontakty_ok=False):
         for pometka in t["pometki"]:
             if pometka.startswith("⚠"):
                 problemy.append(f"{imya}: не решена пометка «{pometka}». Удалите строку, когда решите.")
-        metki = sorted(set(METKA_SKRYTOGO.findall(otvet + " " + " ".join(t["kak_sprashivayut"]))))
-        for metka in metki:
-            problemy.append(f"{imya}: осталась метка [{metka}]. Впишите контакт компании или уберите метку.")
+        for metka in sorted(set(METKA_SKRYTOGO.findall(otvet))):
+            problemy.append(f"{imya}: в ответе осталась метка [{metka}]. Впишите вместо неё свой контакт или уберите метку.")
+        for metka in sorted(set(METKA_SKRYTOGO.findall(" ".join(t["kak_sprashivayut"])))):
+            problemy.append(
+                f"{imya}: в «Как спрашивают» осталась метка [{metka}]. Это данные клиента: удалите метку из вопроса."
+            )
         if not kontakty_ok:
             vidy = sorted({vid for vid, shablon in MASKI if shablon.search(otvet)})
             for vid in vidy:

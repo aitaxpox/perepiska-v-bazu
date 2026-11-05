@@ -88,6 +88,17 @@ class TestProverka(unittest.TestCase):
         p = self.problemy(odna_tema(otvet="Пишите на [почта]"))
         self.assertEqual(len(p), 1)
         self.assertIn("[почта]", p[0])
+        self.assertIn("в ответе", p[0])
+        self.assertIn("контакт", p[0])
+
+    def test_metka_skrytyh_dannyh_v_voprose(self):
+        tekst = odna_tema().replace("«Как записаться?»", "«Как записаться? Мой телефон [телефон]»")
+        p = self.problemy(tekst)
+        self.assertEqual(len(p), 1)
+        self.assertIn("[телефон]", p[0])
+        self.assertIn("«Как спрашивают»", p[0])
+        self.assertIn("удалите", p[0])
+        self.assertNotIn("контакт компании", p[0])
 
     def test_nastoyashchiy_telefon_v_otvete(self):
         p = self.problemy(odna_tema(otvet="Звоните +7 000 111-22-33"))
