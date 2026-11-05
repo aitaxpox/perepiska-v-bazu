@@ -621,7 +621,7 @@ def main(argv=None):
         if hasattr(potok, "reconfigure"):
             potok.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description="Готовит выгрузку переписки к разбору.")
-    p.add_argument("put", help="файл выгрузки: result.json, .txt WhatsApp или .csv")
+    p.add_argument("put", nargs="?", help="выгрузка: папка Telegram, messages.html, result.json, .txt WhatsApp или .csv")
     p.add_argument("--info", action="store_true", help="показать формат, участников, колонки CSV")
     p.add_argument("--vladelec", action="append", help="имя владельца как в выгрузке; можно несколько раз")
     p.add_argument("--avtor", help="CSV: колонка с автором")
@@ -630,7 +630,15 @@ def main(argv=None):
     p.add_argument("--s", help="брать сообщения начиная с даты ГГГГ-ММ-ДД")
     p.add_argument("--format", choices=["telegram", "telegram-html", "whatsapp", "csv"], help="если формат не угадался")
     p.add_argument("-o", help="записать результат в файл")
+    p.add_argument("--shablon", action="store_true", help="напечатать шаблон razbor.md")
     args = p.parse_args(argv)
+    if args.shablon:
+        put = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "shablon-razbora.md")
+        with open(put, encoding="utf-8") as f:
+            sys.stdout.write(f.read())
+        return 0
+    if not args.put:
+        p.error("укажите путь к выгрузке переписки")
     try:
         if args.info:
             pechat_info(args.put, args)

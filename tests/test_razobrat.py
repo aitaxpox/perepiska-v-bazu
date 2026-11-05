@@ -294,6 +294,18 @@ class TestKomanda(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("| Владелец | Расписание: пн, ср, пт в 19:00. Почта для вопросов [почта]", r.stdout)
 
+    def test_shablon_pechataetsya_bez_vygruzki(self):
+        r = self.zapustit("--shablon")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        put = os.path.join(KOREN, "skills", "razbor-perepiski", "shablon-razbora.md")
+        with open(put, encoding="utf-8") as f:
+            self.assertEqual(r.stdout, f.read())
+
+    def test_bez_vygruzki_i_bez_shablona_oshibka(self):
+        r = self.zapustit()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("выгрузк", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
