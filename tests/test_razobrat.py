@@ -272,7 +272,7 @@ class TestKomanda(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             with open(vyhod, encoding="utf-8") as f:
                 tekst = f.read()
-        self.assertIn("2026-07-01 10:10 | Владелец | Да, можно в два платежа. Напишите на [почта] или [ник]", tekst)
+        self.assertIn("2026-07-01 10:10 | Владелец | Да, можно в два платежа. Перезвоним вам в течение часа и всё расскажем.", tekst)
         self.assertNotIn("Ирина", tekst)
         self.assertIn("голосовое: 1", r.stdout)
 
@@ -300,6 +300,16 @@ class TestKomanda(unittest.TestCase):
         put = os.path.join(KOREN, "skills", "razbor-perepiski", "shablon-razbora.md")
         with open(put, encoding="utf-8") as f:
             self.assertEqual(r.stdout, f.read())
+
+    def test_pamyatka_obyasnyaet_bloki_i_metki(self):
+        r = self.zapustit("--shablon")
+        pamyatka = r.stdout.split("## Как работать с этим файлом", 1)[1].split("## Сводка", 1)[0]
+        self.assertIn("только два блока: «Как спрашивают» и «Ответ для базы»", pamyatka)
+        self.assertIn("справка для вас", pamyatka)
+        for metka in ("[имя]", "[телефон]", "[почта]", "[ник]"):
+            self.assertIn(metka, pamyatka)
+        self.assertIn("вместе со словами вокруг", pamyatka)
+        self.assertIn("ℹ️ можно оставить", pamyatka)
 
     def test_bez_vygruzki_i_bez_shablona_oshibka(self):
         r = self.zapustit()
