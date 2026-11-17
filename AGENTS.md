@@ -1,11 +1,11 @@
 # perepiska-v-bazu
 
-Открытый плагин для Claude Code: переписка с клиентами (Telegram, WhatsApp, CSV) → разбор `razbor.md`, который человек правит руками → документ базы знаний.
+Открытый плагин для Claude Code и Codex: переписка с клиентами (Telegram, WhatsApp, CSV) → разбор `razbor.md`, который человек правит руками → документ базы знаний.
 
 ## Как устроено
 
 - `skills/razbor-perepiski/` — первый заход: скилл и скрипт `scripts/razobrat.py`.
-- `skills/sborka-bazy/` — второй заход: скилл и скрипт проверки перед сборкой.
+- `skills/sborka-bazy/` — второй заход: скилл и скрипт `scripts/sobrat.py`, который проверяет разбор и собирает базу.
 - `examples/` — учебные переписки, все люди и данные выдуманы.
 - `tests/` — тесты на `unittest`.
 

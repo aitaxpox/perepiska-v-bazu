@@ -36,6 +36,10 @@ TEMA = """## Тема: Запись
 """
 
 
+def vidimye(papka):
+    return sorted(f for f in os.listdir(papka) if not f.startswith("."))
+
+
 def odna_tema(otvet="Напишите в этот чат.", pometki=""):
     return "# Разбор переписки: Тест\n\n" + TEMA.format(otvet=otvet, pometki=pometki)
 
@@ -150,7 +154,49 @@ class TestKomanda(unittest.TestCase):
         with tempfile.TemporaryDirectory() as papka:
             r = self.zapustit(PRIMER, "--papka", papka)
             self.assertEqual(r.returncode, 0, r.stderr)
-            self.assertEqual(sorted(os.listdir(papka)), ["oplata-chastyami.md", "tsena-abonementa.md"])
+            self.assertEqual(vidimye(papka), ["oplata-chastyami.md", "tsena-abonementa.md"])
+
+    def zapisat_razbor(self, papka, tekst):
+        razbor = os.path.join(papka, "razbor.md")
+        with open(razbor, "w", encoding="utf-8") as f:
+            f.write(tekst)
+        return razbor
+
+    def test_papka_staryy_fayl_ostanavlivaet_sborku(self):
+        with tempfile.TemporaryDirectory() as rabochaya, tempfile.TemporaryDirectory() as papka:
+            self.assertEqual(self.zapustit(PRIMER, "--papka", papka).returncode, 0)
+            razbor = self.zapisat_razbor(rabochaya, odna_tema())
+            r = self.zapustit(razbor, "--papka", papka)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(vidimye(papka), ["oplata-chastyami.md", "tsena-abonementa.md"])
+        self.assertIn("oplata-chastyami.md", r.stderr)
+        self.assertIn("--ochistit", r.stderr)
+
+    def test_papka_ochistit_udalyaet_starye_fayly(self):
+        with tempfile.TemporaryDirectory() as rabochaya, tempfile.TemporaryDirectory() as papka:
+            self.zapustit(PRIMER, "--papka", papka)
+            razbor = self.zapisat_razbor(rabochaya, odna_tema())
+            r = self.zapustit(razbor, "--papka", papka, "--ochistit")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(vidimye(papka), ["zapis.md"])
+        self.assertIn("oplata-chastyami.md", r.stdout)
+
+    def test_papka_povtornaya_sborka_bez_ostanovki(self):
+        with tempfile.TemporaryDirectory() as papka:
+            self.zapustit(PRIMER, "--papka", papka)
+            r = self.zapustit(PRIMER, "--papka", papka)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_papka_chuzhie_fayly_ne_trogaet(self):
+        with tempfile.TemporaryDirectory() as papka:
+            zametki = os.path.join(papka, "moi-zametki.md")
+            with open(zametki, "w", encoding="utf-8") as f:
+                f.write("# Мои заметки\n\nКак спрашивают: «это не тема из сборки»\n")
+            razbor = self.zapisat_razbor(papka, odna_tema())
+            self.assertEqual(self.zapustit(PRIMER, "--papka", papka).returncode, 0)
+            r = self.zapustit(razbor, "--papka", papka, "--ochistit")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(vidimye(papka), ["moi-zametki.md", "razbor.md", "zapis.md"])
 
     def test_problemy_ostanavlivayut_sborku(self):
         with tempfile.TemporaryDirectory() as papka:

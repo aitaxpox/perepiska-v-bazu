@@ -9,6 +9,11 @@
 
     python3 sobrat.py razbor.md -o baza-znaniy.md
     python3 sobrat.py razbor.md --papka baza-znaniy
+
+В режиме --papka скрипт помнит, какие файлы записал, в скрытом файле .sobrano.txt
+внутри папки. Если при следующей сборке там остались файлы тем, которых больше нет
+в базе, сборка останавливается: без --ochistit они ушли бы в бота. Чужие файлы
+в папке скрипт не трогает.
 """
 
 import argparse
@@ -129,6 +134,32 @@ def imya_fayla(nazvanie):
     return (lat or "tema") + ".md"
 
 
+ZAPISANO = ".sobrano.txt"
+
+
+def imena_fayla_po_temam(temy):
+    zanyato = []
+    for t in temy:
+        osnova = imya_fayla(t["nazvanie"])
+        imya, n = osnova, 2
+        while imya in zanyato:
+            imya = osnova[:-3] + f"-{n}.md"
+            n += 1
+        zanyato.append(imya)
+    return zanyato
+
+
+def starye_fayly(papka, novye):
+    """Файлы прошлой сборки, которых нет среди новых и которые ещё лежат в папке."""
+    put = os.path.join(papka, ZAPISANO)
+    if not os.path.isfile(put):
+        return []
+    with open(put, encoding="utf-8") as f:
+        proshlye = [s.strip() for s in f if s.strip()]
+    return [imya for imya in proshlye
+            if imya not in novye and os.path.basename(imya) == imya and os.path.isfile(os.path.join(papka, imya))]
+
+
 def main(argv=None):
     for potok in (sys.stdout, sys.stderr):
         if hasattr(potok, "reconfigure"):
@@ -137,6 +168,8 @@ def main(argv=None):
     p.add_argument("razbor", help="исправленный файл razbor.md")
     p.add_argument("-o", help="файл базы знаний, по умолчанию baza-znaniy.md рядом с разбором")
     p.add_argument("--papka", help="вместо одного файла — папка, по файлу на тему")
+    p.add_argument("--ochistit", action="store_true",
+                   help="в режиме --papka удалить файлы тем из прошлой сборки, которых нет в новой")
     p.add_argument("--kontakty-ok", action="store_true", help="телефоны и почты в ответах — контакты компании")
     args = p.parse_args(argv)
 
@@ -157,17 +190,26 @@ def main(argv=None):
 
     otmecheno = [t for t in temy if t["v_bazu"]]
     if args.papka:
+        imena = imena_fayla_po_temam(otmecheno)
+        starye = starye_fayly(args.papka, imena) if os.path.isdir(args.papka) else []
+        if starye and not args.ochistit:
+            print(f"Сборка остановлена: в папке {args.papka} остались файлы прошлой сборки,"
+                  " этих тем в новой базе нет:", file=sys.stderr)
+            for imya in starye:
+                print(f"- {imya}", file=sys.stderr)
+            print("Если их оставить, они уйдут в бота. Удалите их сами"
+                  " или запустите сборку ещё раз с --ochistit.", file=sys.stderr)
+            return 2
         os.makedirs(args.papka, exist_ok=True)
-        zanyato = set()
-        for t in otmecheno:
-            imya = imya_fayla(t["nazvanie"])
-            n = 2
-            while imya in zanyato:
-                imya = imya_fayla(t["nazvanie"])[:-3] + f"-{n}.md"
-                n += 1
-            zanyato.add(imya)
+        for imya in starye:
+            os.remove(os.path.join(args.papka, imya))
+        for t, imya in zip(otmecheno, imena):
             with open(os.path.join(args.papka, imya), "w", encoding="utf-8") as f:
                 f.write("\n".join(tekst_temy(t, "#")).rstrip() + "\n")
+        with open(os.path.join(args.papka, ZAPISANO), "w", encoding="utf-8") as f:
+            f.write("".join(imya + "\n" for imya in imena))
+        if starye:
+            print("Удалены файлы прошлой сборки: " + ", ".join(starye))
         kuda = args.papka
     else:
         kuda = args.o or os.path.join(os.path.dirname(os.path.abspath(args.razbor)), "baza-znaniy.md")
